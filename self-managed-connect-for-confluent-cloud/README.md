@@ -56,7 +56,7 @@ Before proceeding with creating a table, if you don't want to use the default da
 
 Then open a SQL console and enable the database for CDC as we are using Debezium CDC Source Connector to ingest data into Kafka. 
 You need a SQL Server Standard Edition (at least) to be able to enable CDC. 
- 
+
 ```sql
 EXEC sys.sp_cdc_enable_db;
 ```
@@ -65,11 +65,11 @@ Then create a table for our users:
 
 ```sql
 CREATE TABLE ecommerce.dbo.users (
-	user_id varchar(100) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL,
-	name varchar(100) COLLATE SQL_Latin1_General_CP1_CI_AS NULL,
-	address varchar(100) COLLATE SQL_Latin1_General_CP1_CI_AS NULL,
+	user_id varchar(100) NOT NULL,
+	name varchar(100) NULL,
+	address varchar(100) NULL,
 	date_of_birth date NULL,
-	email varchar(100) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL,
+	email varchar(100) NOT NULL,
 	credits money NOT NULL,
 	CONSTRAINT users_PK PRIMARY KEY (user_id)
 );
@@ -109,3 +109,238 @@ SELECT user_id, name, address, date_of_birth, email, credits
 FROM ecommerce.dbo.users;
 
 ```
+
+## Ansible
+
+Our Ansible installation script contains different sections: 
+
+- General section for connection to Confluent Cloud: 
+
+```yml
+    ansible_connection: "ssh"
+    ansible_user: "ubuntu"
+    ansible_become: "true"
+    ansible_ssh_private_key_file: "{{ SSH_PRIVATE_KEY }}"
+    jmxexporter_enabled: "true"
+    jolokia_enabled: "true"
+
+    ccloud_kafka_enabled: "true"
+    ccloud_kafka_bootstrap_servers: "{{ BROKER_URL }}"
+    ccloud_kafka_key: "{{ API_KEY }}"
+    ccloud_kafka_secret: "{{ API_SECRET }}"
+    ccloud_schema_registry_enabled: "true"
+    ccloud_schema_registry_url: "{{ SR_URL }}"
+    ccloud_schema_registry_key: "{{ SR_API_KEY }}"
+    ccloud_schema_registry_secret: "{{ SR_API_SECRET }}"
+```
+
+- Kafka Connect plugins and hosts: 
+
+```yml
+kafka_connect:
+  vars:
+    kafka_connect_plugins_path:
+      - /usr/share/java
+
+    kafka_connect_confluent_hub_plugins:
+      - mongodb/kafka-connect-mongodb:1.9.1
+      - debezium/debezium-connector-sqlserver:2.0.1
+
+  hosts:
+    <connect-host-1>:
+    <connect-host-2>:
+```
+
+- Control Center host: 
+
+```yml
+control_center:
+  hosts:
+    <control-center-host>:
+```
+
+- Kafka Connect Workers Override properties:
+
+```yml
+    kafka_connect_custom_properties:
+      group.id: connect-cluster-on-prem
+      
+      replication.factor: 3
+      topic.creation.enable: true
+
+      # Confluent Cloud Connection to Kafka Cluster
+
+      sasl.mechanism: PLAIN
+      security.protocol: SASL_SSL
+      bootstrap.servers: "{{ BROKER_URL }}"
+      sasl.jaas.config: org.apache.kafka.common.security.plain.PlainLoginModule required username="{{ API_KEY }}" password="{{ API_SECRET }}";
+
+      # Configuration for embedded producer
+      
+      producer.security.protocol: SASL_SSL
+      producer.sasl.mechanism: PLAIN
+      producer.sasl.jaas.config: org.apache.kafka.common.security.plain.PlainLoginModule required username="{{ API_KEY }}" password="{{ API_SECRET }}";
+      
+      # Configuration for embedded consumer
+      
+      consumer.sasl.mechanism: PLAIN
+      consumer.security.protocol: SASL_SSL
+      consumer.sasl.jaas.config: org.apache.kafka.common.security.plain.PlainLoginModule required username="{{ API_KEY }}" password="{{ API_SECRET }}";
+      
+      # Confluent Schema Registry for Kafka Connect
+      
+      key.converter: io.confluent.connect.avro.AvroConverter
+      key.converter.basic.auth.credentials.source: USER_INFO
+      key.converter.schema.registry.basic.auth.user.info: "{{ SR_API_KEY }}:{{ SR_API_SECRET }}"
+      key.converter.schema.registry.url: "{{ SR_URL }}"
+      
+      value.converter: io.confluent.connect.avro.AvroConverter
+      value.converter.basic.auth.credentials.source: USER_INFO
+      value.converter.schema.registry.basic.auth.user.info: "{{ SR_API_KEY }}:{{ SR_API_SECRET }}"
+      value.converter.schema.registry.url: "{{ SR_URL }}"
+```
+
+- Configurations for the Connect plugins:
+
+    This line opens the connect plugins list: 
+
+    ```yml
+    kafka_connect_connectors:
+    ```
+
+    - MongoDB Source Connector
+
+    ```yml
+      - name: mongodb-orders-source-connector
+        config:
+          connector.class: "com.mongodb.kafka.connect.MongoSourceConnector"
+          tasks.max: "1"
+          connection.uri: "mongodb://{{ MONGODB_USER }}:{{ MONGODB_PASSWORD }}@{{ MONGODB_CONN_STRING }}"
+          database: "{{ MONGODB_NAME }}"
+          topic.prefix: "mongo.src"
+          collection: "orders"
+          startup.mode: "copy_existing"
+          output.format.value: "schema"
+          topic.creation.default.enable: "true"
+          topic.creation.default.replication.factor: "3"
+          topic.creation.default.partitions: "1"
+          errors.log.enable: "true"
+          errors.log.include.messages: "true"
+    ```
+
+    - SQL Server Source Connector
+
+    ```yml
+      - name: sql-server-users-source-connector
+        config: 
+          connector.class: "io.debezium.connector.sqlserver.SqlServerConnector"
+          tasks.max: "1"
+          database.hostname: "{{ SQL_SERVER_ENDPOINT }}"
+          database.server.name: "{{ SQL_SERVER_ENDPOINT }}"
+          database.port: "{{ SQL_SERVER_CONN_PORT }}"
+          database.user: "{{ SQL_SERVER_USER }}"
+          database.password: "{{ SQL_SERVER_PASSWORD }}"
+          database.dbname: "{{ SQL_SERVER_DB_NAME }}"
+          database.encrypt: "false"
+          database.history.kafka.bootstrap.servers: "{{ BROKER_URL }}"
+          database.history.consumer.sasl.jaas.config: org.apache.kafka.common.security.plain.PlainLoginModule required username="{{ API_KEY }}" password="{{ API_SECRET }}";
+          database.history.consumer.sasl.mechanism: "PLAIN"
+          database.history.consumer.security.protocol: "SASL_SSL"
+          database.history.consumer.ssl.endpoint.identification.algorithm: "https"
+          database.history.producer.sasl.jaas.config: org.apache.kafka.common.security.plain.PlainLoginModule required username="{{ API_KEY }}" password="{{ API_SECRET }}";
+          database.history.producer.sasl.mechanism: "PLAIN"
+          database.history.producer.security.protocol: "SASL_SSL"
+          database.history.skip.unparseable.ddl: "true"
+          decimal.handling.mode: "precise"
+          errors.log.enable: "true"
+          errors.log.include.messages: "true"
+          errors.tolerance: "all"
+          event.processing.failure.handling.mode": "fail"
+          table.include.list: "{{ SQL_SERVER_SCHEMA_NAME }}.users"
+          database.history.kafka.topic: "sql.src.history"
+          max.batch.size: "1000"
+          poll.interval.ms: "1000"
+          provide.transaction.metadata: "false"
+          snapshot.isolation.mode: "repeatable_read"
+          snapshot.mode: "initial"
+          time.precision.mode: "adaptive"
+          tombstones.on.delete: "true"
+          topic.prefix: "sql.src"
+          topic.creation.default.enable: "true"
+          topic.creation.default.replication.factor: "3"
+          topic.creation.default.partitions: "1"
+          transforms: "CastMoney"
+          transforms.CastMoney.type: "org.apache.kafka.connect.transforms.Cast$Value"
+          transforms.CastMoney.spec: "credits:double"
+    ```
+
+I have extracted few variables using placeholders and have an external file where these can be filled with the right value and the file can be encrypted with `ansible-vault`, for example.
+
+Here's a template for the file: 
+
+```properties
+SSH_PRIVATE_KEY: ~/path/to-my/aws-key.pem
+
+BROKER_URL: <kafka-bootstrap>.aws.confluent.cloud:9092
+API_KEY: <kafka-api-key>
+API_SECRET: <kafka-api-secret>
+
+SR_URL: https://<sr-name>.aws.confluent.cloud
+SR_API_KEY: <sr-api-key>
+SR_API_SECRET: <sr-api-secret>
+
+MONGODB_CONN_STRING: <your-ec2-hostname>.compute.amazonaws.com:27017
+MONGODB_NAME: my-mongo-db
+MONGODB_USER: mongo-user
+MONGODB_PASSWORD: 4n07h3r_p4$$w0rD
+
+SQL_SERVER_ENDPOINT: <rds-db-instance>.<region>.rds.amazonaws.com
+SQL_SERVER_CONN_PORT: 1433
+SQL_SERVER_DB_NAME: my-db-name
+SQL_SERVER_SCHEMA_NAME: my-schema-name
+SQL_SERVER_USER: my-db-user
+SQL_SERVER_PASSWORD: p4$$w0rD
+```
+
+You can use the following command to encrypt the file with ansible-vault (it'll ask for a password):
+
+```sh
+ansible-vault encrypt secrets_file.enc
+```
+
+Once you have all the variables set, then you can run a check to make sure ansible can connect to your VMs: 
+
+```sh
+ansible -i hosts.yml all -m ping
+```
+
+If these are successful, then download the ansible collection for Confluent Platform: 
+
+```sh
+ansible-galaxy collection install confluent.platform:7.3.3
+```
+
+And then we're ready to run the deployment of the Connect Cluster and connector plugins: 
+
+```sh
+ansible-playbook -e @secrets_file.enc --vault-password-file password_file -i hosts.yml confluent.platform.all
+```
+
+To check the Connect and connectors logs, login on the VMs where the workers have been deployed, and run the following commands:
+
+```sh
+sudo su
+
+cd /var/log/kafka
+
+tail -1000f connect.log
+```
+
+You can also check the installed connectors and their status from the browser, using this url: 
+
+```
+http://<your-connect-worker-host>:8083/connectors
+
+http://<your-connect-worker-host>:8083/connectors/<connector-name>/status
+```
+

@@ -344,3 +344,4 @@ http://<your-connect-worker-host>:8083/connectors
 http://<your-connect-worker-host>:8083/connectors/<connector-name>/status
 ```
 
+You can finally go to your Confluent Cloud UI and make sure you see the data produced in the topics - or use the confluent CLI to consume messages from the topic. 

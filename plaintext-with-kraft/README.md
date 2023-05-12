@@ -20,13 +20,7 @@ Once you have all the variables set, then you can run a check to make sure ansib
 ansible -i hosts.yml all -m ping -e "SSH_PRIVATE_KEY=~/path/to-my/aws-key.pem"
 ```
 
-If these are successful, then download the ansible collection for Confluent Platform: 
-
-```sh
-ansible-galaxy collection install confluent.platform:7.4.0
-```
-
-And then we're ready to run the deployment of the Confluent Platform: 
+We're now ready to run the deployment of the Confluent Platform: 
 
 ```sh
 ansible-playbook -e @secrets_file.enc --vault-password-file password_file -i hosts.yml confluent.platform.all
@@ -34,13 +28,13 @@ ansible-playbook -e @secrets_file.enc --vault-password-file password_file -i hos
 
 ## Access Confluent Control Center
 
-Use your C3 host followed by port 9021 to access it from the browser `http://c3-host:9021`
-
+Use your C3 host followed by port 9021 to access it from the browser `http://<control-center-url>:9021`
 
 
 ## Verify that the platform is up and running from Confluent Control Center
 
-http://<control-center-url>:9021
+From the control center UI move between the different tabs and verify that the different components are in the correct state. 
+You can also view the topics, Producers/Consumers throughput and more.
 
 
 

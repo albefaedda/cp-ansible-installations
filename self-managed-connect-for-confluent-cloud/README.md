@@ -311,7 +311,7 @@ ansible-vault encrypt secrets_file.enc
 Once you have all the variables set, then you can run a check to make sure ansible can connect to your VMs: 
 
 ```sh
-ansible -i hosts.yml all -m ping
+ansible -i hosts.yml all -m ping -e "SSH_PRIVATE_KEY=~/path/to-my/aws-key.pem"
 ```
 
 If these are successful, then download the ansible collection for Confluent Platform: 
